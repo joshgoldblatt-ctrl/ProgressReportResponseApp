@@ -1,21 +1,50 @@
 <!DOCTYPE html>
 <!--
-  LaGuardia Faculty Progress Report Response App
-  Developed by Josh Goldblatt, Academic Affairs, using Claude
-
-  Version History:
-  - V2.8 (February 10, 2026): Added PDF export for Course Analysis (all departments and per-department)
-  - V2.7 (February 10, 2026): Fixed CSF course prefix mapping from ELA to FYS department
-  - V2.6: Previous version
+================================================================================
+  App:          LaGuardia Faculty Progress Report Response App
+  Version:      3.1
+  Released:     April 24, 2026
+  Developed by: Josh Goldblatt using Claude
+================================================================================
+  CHANGELOG (most recent first)
+--------------------------------------------------------------------------------
+  v3.1  2026-04-24
+    - Export All Depts PDF now downloads as a single .zip file instead of
+      triggering individual file saves, using JSZip library for compression
+    - Added "Export All Non-Respondents CSV" button that bundles all per-department
+      non-respondent CSVs into a single .zip file for batch download
+    - Refactored exportDepartmentToPDF() and exportNonRespondentsCSV() to support
+      dual mode: direct download for individual use, or return blob/content for
+      zip bundling
+  v3.0  2026-04-24
+    - Migrated to standardized app metadata, header, and file naming conventions
+    - Added "Export All Departments" button on Faculty Detail tab: batch-generates
+      all individual department PDFs at once instead of selecting one at a time
+    - Added "Export Non-Respondents CSV" per-department dropdown on Faculty Detail
+      tab: exports a CSV of faculty who completed 0 progress reports, including
+      their email address, for follow-up outreach purposes
+    - Began capturing "Professor Requested  Email" (two-space column header) from
+      CSV during data processing and storing it in facultyDepartmentStats
+  v2.8  2026-02-10
+    - Added PDF export for Course Analysis tab (both "Export All" for all
+      departments in one PDF and per-department dropdown)
+  v2.7  2026-02-10
+    - Fixed CSF course prefix mapping: was incorrectly mapped to ELA, now
+      correctly maps to FYS (First Year Seminar) department
+  v2.6
+    - Previous version (pre-migration baseline)
+================================================================================
 -->
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LaGuardia Faculty Progress Report Response App_Version 2.8</title>
+    <title>LaGuardia Faculty Progress Report Response App_3.1</title>
     <!-- Add jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <!-- Add JSZip library for compressed folder exports -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -253,6 +282,15 @@
             display: flex;
             gap: 10px;
             align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .csv-export-button {
+            background: linear-gradient(135deg, #17a2b8 0%, #138496 100%) !important;
+        }
+
+        .csv-export-button:hover {
+            box-shadow: 0 4px 12px rgba(23, 162, 184, 0.3) !important;
         }
 
         @keyframes fadeIn {
@@ -521,8 +559,8 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>📊 LaGuardia Faculty Progress Report Response App_V2.8</h1>
-            <div class="subtitle">Version 2.8 - Released February 10, 2026</div>
+            <h1>📊 LaGuardia Faculty Progress Report Response App</h1>
+            <div class="subtitle">Version 3.1 — Released April 24, 2026</div>
             <div class="subtitle">Developed by Josh Goldblatt using Claude</div>
         </div>
 
@@ -821,6 +859,7 @@
                 
                 const facultyId = row['Professor Requested ID'];
                 const facultyName = row['Professor Requested Name'];
+                const facultyEmail = row['Professor Requested  Email'] || '';
                 const courseNumber = row['Course Number'];
                 const courseName = row['Course Name'];
                 const responded = row['Responded'] === 'Yes';
@@ -848,6 +887,7 @@
                     facultyDepartmentStats.set(facultyDeptKey, {
                         facultyId: facultyId,
                         name: facultyName,
+                        email: facultyEmail,
                         department: department,
                         reportsSent: 0,
                         reportsCompleted: 0
@@ -856,6 +896,8 @@
                 const facultyDept = facultyDepartmentStats.get(facultyDeptKey);
                 facultyDept.reportsSent++;
                 if (responded) facultyDept.reportsCompleted++;
+                // Update email if we didn't have it before
+                if (!facultyDept.email && facultyEmail) facultyDept.email = facultyEmail;
 
                 // Track department stats
                 if (!departmentStats.has(department)) {
@@ -1024,6 +1066,29 @@
                                 <div class="department-dropdown-header">Select Department</div>
                             </div>
                         </div>
+                        <button class="export-button" onclick="exportAllDepartmentsPDF()">
+                            <svg fill="white" viewBox="0 0 24 24">
+                                <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20M10,17L8,15L11,12L8,9L10,7L14,11L10,17Z"/>
+                            </svg>
+                            Export All Depts PDF
+                        </button>
+                        <div class="department-export-container">
+                            <button class="export-button csv-export-button" onclick="toggleNonRespondentsDropdown(event)">
+                                <svg fill="white" viewBox="0 0 24 24">
+                                    <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20M10,17L8,15L11,12L8,9L10,7L14,11L10,17Z"/>
+                                </svg>
+                                Export Non-Respondents CSV
+                            </button>
+                            <div class="department-dropdown" id="nonRespondentsDropdown">
+                                <div class="department-dropdown-header">Select Department</div>
+                            </div>
+                        </div>
+                        <button class="export-button csv-export-button" onclick="exportAllNonRespondentsCSV()">
+                            <svg fill="white" viewBox="0 0 24 24">
+                                <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20M10,17L8,15L11,12L8,9L10,7L14,11L10,17Z"/>
+                            </svg>
+                            Export All Non-Respondents CSV
+                        </button>
                     </div>
                 </div>
             `;
@@ -1053,6 +1118,21 @@
                             dropdown.classList.remove('show');
                         };
                         dropdown.appendChild(item);
+                    });
+                }
+
+                // Populate non-respondents CSV dropdown
+                const nrDropdown = document.getElementById('nonRespondentsDropdown');
+                if (nrDropdown) {
+                    sortedDepts.forEach(dept => {
+                        const item = document.createElement('div');
+                        item.className = 'department-dropdown-item';
+                        item.textContent = dept;
+                        item.onclick = () => {
+                            exportNonRespondentsCSV(dept);
+                            nrDropdown.classList.remove('show');
+                        };
+                        nrDropdown.appendChild(item);
                     });
                 }
             }, 100);
@@ -1340,18 +1420,33 @@
             event.stopPropagation();
             const dropdown = document.getElementById('departmentDropdown');
             dropdown.classList.toggle('show');
-            // Close courses dropdown if open
+            // Close other dropdowns
             const coursesDropdown = document.getElementById('coursesDepartmentDropdown');
             if (coursesDropdown) coursesDropdown.classList.remove('show');
+            const nrDropdown = document.getElementById('nonRespondentsDropdown');
+            if (nrDropdown) nrDropdown.classList.remove('show');
         }
 
         function toggleCoursesDepartmentDropdown(event) {
             event.stopPropagation();
             const dropdown = document.getElementById('coursesDepartmentDropdown');
             dropdown.classList.toggle('show');
-            // Close faculty dropdown if open
+            // Close other dropdowns
             const facultyDropdown = document.getElementById('departmentDropdown');
             if (facultyDropdown) facultyDropdown.classList.remove('show');
+            const nrDropdown = document.getElementById('nonRespondentsDropdown');
+            if (nrDropdown) nrDropdown.classList.remove('show');
+        }
+
+        function toggleNonRespondentsDropdown(event) {
+            event.stopPropagation();
+            const dropdown = document.getElementById('nonRespondentsDropdown');
+            dropdown.classList.toggle('show');
+            // Close other dropdowns
+            const facultyDropdown = document.getElementById('departmentDropdown');
+            if (facultyDropdown) facultyDropdown.classList.remove('show');
+            const coursesDropdown = document.getElementById('coursesDepartmentDropdown');
+            if (coursesDropdown) coursesDropdown.classList.remove('show');
         }
 
         // Close dropdowns when clicking outside
@@ -1363,6 +1458,10 @@
             const coursesDropdown = document.getElementById('coursesDepartmentDropdown');
             if (coursesDropdown) {
                 coursesDropdown.classList.remove('show');
+            }
+            const nrDropdown = document.getElementById('nonRespondentsDropdown');
+            if (nrDropdown) {
+                nrDropdown.classList.remove('show');
             }
         });
 
@@ -1449,7 +1548,7 @@
             doc.save(`Progress Report Participation_${dateStr}.pdf`);
         }
 
-        function exportDepartmentToPDF(department) {
+        function exportDepartmentToPDF(department, returnBlob) {
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
             
@@ -1578,7 +1677,12 @@
                 margin: { left: 20, right: 20 }
             });
             
-            // Save the PDF with formatted date and department name
+            // If returnBlob is true, return the PDF as a blob for zipping
+            if (returnBlob) {
+                return doc.output('blob');
+            }
+
+            // Otherwise save the PDF directly
             const today = new Date();
             const day = String(today.getDate()).padStart(2, '0');
             const month = String(today.getMonth() + 1).padStart(2, '0');
@@ -1794,6 +1898,126 @@
             const dateStr = `${month}.${day}.${year}`;
             const deptName = department.replace(/\s+/g, '_');
             doc.save(`Progress Report Course Analysis_${deptName}_${dateStr}.pdf`);
+        }
+
+        function exportAllDepartmentsPDF() {
+            // Get all departments
+            const departments = new Set();
+            processedData.facultyDepartmentStats.forEach((faculty, key) => {
+                departments.add(faculty.department);
+            });
+            const sortedDepts = Array.from(departments).sort();
+
+            const today = new Date();
+            const day = String(today.getDate()).padStart(2, '0');
+            const month = String(today.getMonth() + 1).padStart(2, '0');
+            const year = String(today.getFullYear()).slice(-2);
+            const dateStr = `${month}.${day}.${year}`;
+
+            // Create zip file with all department PDFs
+            const zip = new JSZip();
+            sortedDepts.forEach(dept => {
+                const pdfBlob = exportDepartmentToPDF(dept, true);
+                const deptName = dept.replace(/\s+/g, '_');
+                zip.file(`Progress Report Participation_${deptName}_${dateStr}.pdf`, pdfBlob);
+            });
+
+            zip.generateAsync({ type: 'blob' }).then(content => {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(content);
+                link.download = `Progress Report All Departments_${dateStr}.zip`;
+                link.click();
+                URL.revokeObjectURL(link.href);
+            });
+        }
+
+        function exportNonRespondentsCSV(department, returnContent) {
+            // Get faculty in this department who completed 0 reports
+            const nonRespondents = [];
+            processedData.facultyDepartmentStats.forEach((faculty, key) => {
+                if (faculty.department === department && faculty.reportsCompleted === 0) {
+                    nonRespondents.push(faculty);
+                }
+            });
+
+            // Sort by name
+            nonRespondents.sort((a, b) => a.name.localeCompare(b.name));
+
+            if (nonRespondents.length === 0) {
+                if (!returnContent) {
+                    alert(`No non-respondents found for ${department}. All faculty in this department have completed at least one report.`);
+                }
+                return null;
+            }
+
+            // Build CSV content
+            let csv = 'Faculty Name,Email,Department,Reports Sent\n';
+            nonRespondents.forEach(faculty => {
+                // Escape fields that might contain commas
+                const name = `"${faculty.name.replace(/"/g, '""')}"`;
+                const email = `"${(faculty.email || '').replace(/"/g, '""')}"`;
+                const dept = `"${faculty.department.replace(/"/g, '""')}"`;
+                csv += `${name},${email},${dept},${faculty.reportsSent}\n`;
+            });
+
+            // If returnContent is true, return CSV string for zipping
+            if (returnContent) {
+                return csv;
+            }
+
+            // Otherwise trigger direct download
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const today = new Date();
+            const day = String(today.getDate()).padStart(2, '0');
+            const month = String(today.getMonth() + 1).padStart(2, '0');
+            const year = String(today.getFullYear()).slice(-2);
+            const dateStr = `${month}.${day}.${year}`;
+            const deptName = department.replace(/\s+/g, '_');
+            link.href = URL.createObjectURL(blob);
+            link.download = `Non-Respondents_${deptName}_${dateStr}.csv`;
+            link.click();
+            URL.revokeObjectURL(link.href);
+        }
+
+        function exportAllNonRespondentsCSV() {
+            // Get all departments
+            const departments = new Set();
+            processedData.facultyDepartmentStats.forEach((faculty, key) => {
+                departments.add(faculty.department);
+            });
+            const sortedDepts = Array.from(departments).sort();
+
+            const today = new Date();
+            const day = String(today.getDate()).padStart(2, '0');
+            const month = String(today.getMonth() + 1).padStart(2, '0');
+            const year = String(today.getFullYear()).slice(-2);
+            const dateStr = `${month}.${day}.${year}`;
+
+            // Create zip file with all department CSVs
+            const zip = new JSZip();
+            let hasAny = false;
+            sortedDepts.forEach(dept => {
+                const csvContent = exportNonRespondentsCSV(dept, true);
+                if (csvContent) {
+                    const deptName = dept.replace(/\s+/g, '_');
+                    zip.file(`Non-Respondents_${deptName}_${dateStr}.csv`, csvContent);
+                    hasAny = true;
+                }
+            });
+
+            if (!hasAny) {
+                alert('No non-respondents found in any department. All faculty have completed at least one report.');
+                return;
+            }
+
+            zip.generateAsync({ type: 'blob' }).then(content => {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(content);
+                link.download = `Non-Respondents All Departments_${dateStr}.zip`;
+                link.click();
+                URL.revokeObjectURL(link.href);
+            });
         }
     </script>
 </body>
