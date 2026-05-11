@@ -2,13 +2,23 @@
 <!--
 ================================================================================
   App:          LaGuardia Faculty Progress Report Response App
-  Version:      3.1
-  Released:     April 24, 2026
+  Version:      3.2
+  Released:     May 11, 2026
   Developed by: Josh Goldblatt using Claude
 ================================================================================
   CHANGELOG (most recent first)
 --------------------------------------------------------------------------------
-  v3.1  2026-04-24
+  v3.2  2026-05-11
+    - Added new course prefix mappings: IND -> Other, SGN -> NAS, SSI -> SOC SCI
+    - Added CMF and SYF to FYS department (previously unmapped / mapped to SOC SCI)
+    - FYS courses now count in BOTH the FYS department AND their home department:
+      BTF->BAT, CJF->SOC SCI, CSF->MEC, ECF->MEC, EDF->ELA, ENF->ENG, FAF->HUM,
+      HAF->HUM, HSF->HLT SCI, IDF->HUM, LIF->LIBARTS, LMF->LIBARTS, MRF->HUM,
+      NSF->NAS, CMF->HUM, SYF->SOC SCI
+    - Refactored getDepartment() to getDepartments() returning an array, and
+      processCSV() to loop over multiple departments per row for department-level
+      stats while keeping overview stats counted once per row
+  v3.1  2026-05-11
     - Export All Depts PDF now downloads as a single .zip file instead of
       triggering individual file saves, using JSZip library for compression
     - Added "Export All Non-Respondents CSV" button that bundles all per-department
@@ -16,7 +26,7 @@
     - Refactored exportDepartmentToPDF() and exportNonRespondentsCSV() to support
       dual mode: direct download for individual use, or return blob/content for
       zip bundling
-  v3.0  2026-04-24
+  v3.0  2026-05-11
     - Migrated to standardized app metadata, header, and file naming conventions
     - Added "Export All Departments" button on Faculty Detail tab: batch-generates
       all individual department PDFs at once instead of selecting one at a time
@@ -39,7 +49,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LaGuardia Faculty Progress Report Response App_3.1</title>
+    <title>LaGuardia Faculty Progress Report Response App_3.2</title>
     <!-- Add jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
@@ -560,7 +570,7 @@
     <div class="container">
         <div class="header">
             <h1>📊 LaGuardia Faculty Progress Report Response App</h1>
-            <div class="subtitle">Version 3.1 — Released April 24, 2026</div>
+            <div class="subtitle">Version 3.2 — Released May 11, 2026</div>
             <div class="subtitle">Developed by Josh Goldblatt using Claude</div>
         </div>
 
@@ -678,15 +688,39 @@
             'SCP': 'NAS',
             'ENX': 'Other',
             'FSG': 'Other',
+            'IND': 'Other',
             'LRC': 'Other',
             'REG': 'Other',
             'SSA': 'SOC SCI',
             'SSE': 'SOC SCI',
             'SSH': 'SOC SCI',
+            'SSI': 'SOC SCI',
             'SSJ': 'SOC SCI',
             'SSP': 'SOC SCI',
             'SSS': 'SOC SCI',
             'SSY': 'SOC SCI',
+            'SGN': 'NAS',
+            'SYF': 'FYS',
+            'CMF': 'FYS'
+        };
+
+        // FYS courses also count in their home department
+        const FYS_HOME_DEPT = {
+            'BTF': 'BAT',
+            'CJF': 'SOC SCI',
+            'CSF': 'MEC',
+            'ECF': 'MEC',
+            'EDF': 'ELA',
+            'ENF': 'ENG',
+            'FAF': 'HUM',
+            'HAF': 'HUM',
+            'HSF': 'HLT SCI',
+            'IDF': 'HUM',
+            'LIF': 'LIBARTS',
+            'LMF': 'LIBARTS',
+            'MRF': 'HUM',
+            'NSF': 'NAS',
+            'CMF': 'HUM',
             'SYF': 'SOC SCI'
         };
 
@@ -837,9 +871,17 @@
             return data;
         }
 
-        function getDepartment(courseNumber) {
+        function getDepartments(courseNumber) {
             const prefix = courseNumber.split('-')[0];
-            return DEPT_MAPPING[prefix] || 'Unknown';
+            const primaryDept = DEPT_MAPPING[prefix] || 'Unknown';
+            const departments = [primaryDept];
+            
+            // If this is an FYS course, also add the home department
+            if (primaryDept === 'FYS' && FYS_HOME_DEPT[prefix]) {
+                departments.push(FYS_HOME_DEPT[prefix]);
+            }
+            
+            return departments;
         }
 
         function processCSV(csvContent) {
@@ -863,9 +905,9 @@
                 const courseNumber = row['Course Number'];
                 const courseName = row['Course Name'];
                 const responded = row['Responded'] === 'Yes';
-                const department = getDepartment(courseNumber);
+                const departments = getDepartments(courseNumber);
 
-                // Track overall faculty stats (for overview)
+                // Track overall faculty stats (for overview) - count once per row
                 if (!facultyMap.has(facultyId)) {
                     facultyMap.set(facultyId, {
                         name: facultyName,
@@ -876,64 +918,67 @@
                     });
                 }
                 const faculty = facultyMap.get(facultyId);
-                faculty.departments.add(department);
+                departments.forEach(dept => faculty.departments.add(dept));
                 faculty.reportsSent++;
                 if (responded) faculty.reportsCompleted++;
                 faculty.courses.add(courseNumber);
 
-                // Track faculty stats per department (for department views)
-                const facultyDeptKey = `${facultyId}|${department}`;
-                if (!facultyDepartmentStats.has(facultyDeptKey)) {
-                    facultyDepartmentStats.set(facultyDeptKey, {
-                        facultyId: facultyId,
-                        name: facultyName,
-                        email: facultyEmail,
-                        department: department,
-                        reportsSent: 0,
-                        reportsCompleted: 0
-                    });
-                }
-                const facultyDept = facultyDepartmentStats.get(facultyDeptKey);
-                facultyDept.reportsSent++;
-                if (responded) facultyDept.reportsCompleted++;
-                // Update email if we didn't have it before
-                if (!facultyDept.email && facultyEmail) facultyDept.email = facultyEmail;
+                // For each department this course belongs to, track department-level stats
+                departments.forEach(department => {
+                    // Track faculty stats per department (for department views)
+                    const facultyDeptKey = `${facultyId}|${department}`;
+                    if (!facultyDepartmentStats.has(facultyDeptKey)) {
+                        facultyDepartmentStats.set(facultyDeptKey, {
+                            facultyId: facultyId,
+                            name: facultyName,
+                            email: facultyEmail,
+                            department: department,
+                            reportsSent: 0,
+                            reportsCompleted: 0
+                        });
+                    }
+                    const facultyDept = facultyDepartmentStats.get(facultyDeptKey);
+                    facultyDept.reportsSent++;
+                    if (responded) facultyDept.reportsCompleted++;
+                    // Update email if we didn't have it before
+                    if (!facultyDept.email && facultyEmail) facultyDept.email = facultyEmail;
 
-                // Track department stats
-                if (!departmentStats.has(department)) {
-                    departmentStats.set(department, {
-                        facultyIds: new Set(),
-                        facultyCompleted: new Set(),
-                        totalReports: 0,
-                        completedReports: 0
-                    });
-                }
-                const deptStat = departmentStats.get(department);
-                deptStat.facultyIds.add(facultyId);
-                deptStat.totalReports++;
-                if (responded) {
-                    deptStat.completedReports++;
-                }
-                
-                // Check if this faculty has completed ANY reports in this department
-                if (facultyDept.reportsCompleted > 0) {
-                    deptStat.facultyCompleted.add(facultyId);
-                }
+                    // Track department stats
+                    if (!departmentStats.has(department)) {
+                        departmentStats.set(department, {
+                            facultyIds: new Set(),
+                            facultyCompleted: new Set(),
+                            totalReports: 0,
+                            completedReports: 0
+                        });
+                    }
+                    const deptStat = departmentStats.get(department);
+                    deptStat.facultyIds.add(facultyId);
+                    deptStat.totalReports++;
+                    if (responded) {
+                        deptStat.completedReports++;
+                    }
+                    
+                    // Check if this faculty has completed ANY reports in this department
+                    if (facultyDept.reportsCompleted > 0) {
+                        deptStat.facultyCompleted.add(facultyId);
+                    }
 
-                // Track course stats
-                const courseKey = `${department}|${courseNumber}|${courseName}`;
-                if (!courseStats.has(courseKey)) {
-                    courseStats.set(courseKey, {
-                        department: department,
-                        courseNumber: courseNumber,
-                        courseName: courseName,
-                        reportsSent: 0,
-                        reportsCompleted: 0
-                    });
-                }
-                const courseStat = courseStats.get(courseKey);
-                courseStat.reportsSent++;
-                if (responded) courseStat.reportsCompleted++;
+                    // Track course stats
+                    const courseKey = `${department}|${courseNumber}|${courseName}`;
+                    if (!courseStats.has(courseKey)) {
+                        courseStats.set(courseKey, {
+                            department: department,
+                            courseNumber: courseNumber,
+                            courseName: courseName,
+                            reportsSent: 0,
+                            reportsCompleted: 0
+                        });
+                    }
+                    const courseStat = courseStats.get(courseKey);
+                    courseStat.reportsSent++;
+                    if (responded) courseStat.reportsCompleted++;
+                });
             });
 
             // Calculate total faculty who completed at least one report
