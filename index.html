@@ -2,12 +2,47 @@
 <!--
 ================================================================================
   App:          LaGuardia Faculty Progress Report Response App
-  Version:      3.2
-  Released:     May 11, 2026
+  Version:      3.3
+  Released:     July 27, 2026
   Developed by: Josh Goldblatt using Claude
 ================================================================================
   CHANGELOG (most recent first)
 --------------------------------------------------------------------------------
+  v3.3  2026-07-27
+    - DEPARTMENT MODEL CHANGE: First Year Seminar courses no longer form their
+      own "FYS" department. Each FYS course now counts ONLY in its home academic
+      department, so every report maps to exactly one department. This removes
+      the v3.2 dual-department counting, which inflated department report totals
+      by 3,348 rows on the FA25 Session I file and listed 100 faculty in more
+      than one department (now 40, all from genuinely cross-department teaching).
+    - FYS is now a separate VIEW rather than a department: added a "First Year
+      Seminar" summary block to the Overview tab and a dedicated FYS section at
+      the top of both the Faculty Detail and Course Analysis tabs. FYS is also
+      selectable in the department PDF and non-respondent CSV export dropdowns.
+      Internally FYS is stored as a pseudo-department key so all existing export
+      functions work against it unchanged; it is excluded from the Overview
+      department summary table so its reports are never counted twice.
+    - Corrected FYS prefix list per Josh (July 2026 review). ELF was removed from
+      the FYS set: its courses are Elementary French I/II, not First Year
+      Seminars. It was never in FYS_HOME_DEPT, so this is a clarification only.
+      CSF remains MEC (First Year Seminar for Computer Science).
+    - Added course prefix mappings: ELZ -> ELA (Elementary Portuguese; previously
+      unmapped and surfacing as an "Unknown" department with 16 reports),
+      HPF -> HLT SCI (First Year Seminar prefix, not yet present in exports).
+    - Refactored getDepartments() (array) back to getDepartment() (single value)
+      plus a separate isFYSCourse() test, since a course now has exactly one
+      department. processCSV() accumulates the FYS pseudo-department alongside
+      the real one instead of looping over a department array.
+    - NEW: "Export Tableau CSV" on the Overview tab, producing a Tableau-ready
+      file at one row per report (no duplication) for the Progress Report
+      participation workbook. Semester and Session are auto-derived from the
+      Campaign Name column (e.g. "FA25 - Session I" -> FA25 / Session I) into
+      editable fields, and drive the filename
+      <SEMESTER>_<SESSION>_progress_reports_clean.csv. Files are intended for a
+      single OneDrive folder read by a wildcard union, one file per session.
+    - Export carries precomputed faculty-level participation flags (department,
+      FYS, and overall) so the Tableau workbook does not need LOD calculations,
+      plus Section Name, Responded Date, and How Many Notifications Sent.
   v3.2  2026-05-11
     - Added new course prefix mappings: IND -> Other, SGN -> NAS, SSI -> SOC SCI
     - Added CMF and SYF to FYS department (previously unmapped / mapped to SOC SCI)
@@ -49,7 +84,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LaGuardia Faculty Progress Report Response App_3.2</title>
+    <title>LaGuardia Faculty Progress Report Response App_3.3</title>
     <!-- Add jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
@@ -557,6 +592,96 @@
             background: #f8f9fa;
         }
 
+        /* --- v3.3: First Year Seminar view + Tableau export --- */
+        .department-section.fys-section .department-header {
+            background: #e8f6f8;
+            border-left: 4px solid #17a2b8;
+        }
+        .fys-summary {
+            background: #e8f6f8;
+            border-left: 4px solid #17a2b8;
+            border-radius: 8px;
+            padding: 20px 25px;
+            margin-top: 30px;
+        }
+        .fys-summary h3 {
+            color: #0f6674;
+            margin-bottom: 6px;
+        }
+        .fys-summary .fys-note {
+            color: #4a6b70;
+            font-size: 0.9em;
+            margin-bottom: 15px;
+        }
+        .fys-metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+        }
+        .fys-metric {
+            background: white;
+            border-radius: 6px;
+            padding: 15px;
+        }
+        .fys-metric-label {
+            color: #6c757d;
+            font-size: 0.8em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+        .fys-metric-value {
+            font-size: 1.6em;
+            font-weight: 700;
+            color: #0f6674;
+        }
+        .tableau-export-bar {
+            display: flex;
+            align-items: flex-end;
+            flex-wrap: wrap;
+            gap: 15px;
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-left: 4px solid #667eea;
+            border-radius: 8px;
+            padding: 15px 20px;
+            margin-bottom: 25px;
+        }
+        .tableau-export-field {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .tableau-export-field label {
+            font-size: 0.8em;
+            font-weight: 600;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .tableau-export-field input {
+            padding: 8px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            font-size: 0.95em;
+            font-family: inherit;
+            width: 150px;
+        }
+        .tableau-export-field input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .tableau-export-hint {
+            flex: 1 1 100%;
+            color: #6c757d;
+            font-size: 0.85em;
+        }
+        .tableau-export-hint code {
+            background: #eef0f5;
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: #495057;
+        }
         .department-dropdown-header {
             padding: 10px 15px;
             font-weight: 600;
@@ -570,7 +695,7 @@
     <div class="container">
         <div class="header">
             <h1>📊 LaGuardia Faculty Progress Report Response App</h1>
-            <div class="subtitle">Version 3.2 — Released May 11, 2026</div>
+            <div class="subtitle">Version 3.3 — Released July 27, 2026</div>
             <div class="subtitle">Developed by Josh Goldblatt using Claude</div>
         </div>
 
@@ -629,7 +754,6 @@
             'SCN': 'COMM HLT',
             'SSN': 'SOC SCI',  // Mapped to SOC SCI with other SS prefixes
             'CSE': 'ELA',
-            'CSF': 'FYS',
             'EIS': 'ELA',
             'ELA': 'ELA',
             'ELC': 'ELA',
@@ -644,22 +768,31 @@
             'ELS': 'ELA',
             'ESA': 'ELA',
             'ESL': 'ELA',
+            'ELZ': 'ELA',
             'ENA': 'ENG',
             'ENG': 'ENG',
             'ENN': 'ENG',
-            'BTF': 'FYS',
-            'CJF': 'FYS',
-            'ECF': 'FYS',
-            'EDF': 'FYS',
-            'ENF': 'FYS',
-            'FAF': 'FYS',
-            'HAF': 'FYS',
-            'HSF': 'FYS',
-            'IDF': 'FYS',
-            'LIF': 'FYS',
-            'LMF': 'FYS',
-            'MRF': 'FYS',
-            'NSF': 'FYS',
+            // --- First Year Seminar prefixes: mapped to their HOME department.
+            // As of v3.3 FYS is not a department; it is a separate view driven
+            // by FYS_PREFIXES below. Keep these two lists in sync.
+            'BTF': 'BAT',
+            'CJF': 'SOC SCI',
+            'CMF': 'HUM',
+            'CSF': 'MEC',
+            'ECF': 'MEC',
+            'EDF': 'ELA',
+            'ENF': 'ENG',
+            'FAF': 'HUM',
+            'HAF': 'HUM',
+            'HPF': 'HLT SCI',
+            'HSF': 'HLT SCI',
+            'IDF': 'HUM',
+            'LIF': 'LIBARTS',
+            'LMF': 'LIBARTS',
+            'MRF': 'HUM',
+            'NSF': 'NAS',
+            'SYF': 'SOC SCI',
+            // --- end First Year Seminar prefixes
             'SCL': 'HLT SCI',
             'SCO': 'HLT SCI',
             'SCR': 'HLT SCI',
@@ -699,30 +832,25 @@
             'SSP': 'SOC SCI',
             'SSS': 'SOC SCI',
             'SSY': 'SOC SCI',
-            'SGN': 'NAS',
-            'SYF': 'FYS',
-            'CMF': 'FYS'
+            'SGN': 'NAS'
         };
 
-        // FYS courses also count in their home department
-        const FYS_HOME_DEPT = {
-            'BTF': 'BAT',
-            'CJF': 'SOC SCI',
-            'CSF': 'MEC',
-            'ECF': 'MEC',
-            'EDF': 'ELA',
-            'ENF': 'ENG',
-            'FAF': 'HUM',
-            'HAF': 'HUM',
-            'HSF': 'HLT SCI',
-            'IDF': 'HUM',
-            'LIF': 'LIBARTS',
-            'LMF': 'LIBARTS',
-            'MRF': 'HUM',
-            'NSF': 'NAS',
-            'CMF': 'HUM',
-            'SYF': 'SOC SCI'
-        };
+        // First Year Seminar course prefixes.
+        // FYS is NOT a department (v3.3) - these courses count in their home
+        // department in DEPT_MAPPING above. This set drives the separate FYS
+        // view on the Overview, Faculty Detail, and Course Analysis tabs.
+        // NOTE: ELF is deliberately absent - ELF courses are Elementary French,
+        // not First Year Seminars, and belong to ELA as ordinary courses.
+        const FYS_PREFIXES = new Set([
+            'BTF', 'CJF', 'CMF', 'CSF', 'ECF', 'EDF', 'ENF', 'FAF', 'HAF',
+            'HPF', 'HSF', 'IDF', 'LIF', 'LMF', 'MRF', 'NSF', 'SYF'
+        ]);
+
+        // Pseudo-department key holding FYS stats alongside the real departments,
+        // so the existing per-department export functions work against it with no
+        // special cases. It is excluded from the Overview department summary and
+        // from any institution-wide total so FYS reports are never counted twice.
+        const FYS_KEY = 'FYS (First Year Seminar)';
 
         let processedData = null;
 
@@ -871,17 +999,39 @@
             return data;
         }
 
-        function getDepartments(courseNumber) {
-            const prefix = courseNumber.split('-')[0];
-            const primaryDept = DEPT_MAPPING[prefix] || 'Unknown';
-            const departments = [primaryDept];
-            
-            // If this is an FYS course, also add the home department
-            if (primaryDept === 'FYS' && FYS_HOME_DEPT[prefix]) {
-                departments.push(FYS_HOME_DEPT[prefix]);
+        function getCoursePrefix(courseNumber) {
+            return (courseNumber || '').split('-')[0].trim().toUpperCase();
+        }
+
+        // As of v3.3 a course belongs to exactly ONE department. First Year
+        // Seminar courses resolve to their home department via DEPT_MAPPING.
+        function getDepartment(courseNumber) {
+            return DEPT_MAPPING[getCoursePrefix(courseNumber)] || 'Unknown';
+        }
+
+        // FYS sorts to the top of any department list; real departments A-Z.
+        function sortDepartmentKeys(keys) {
+            return Array.from(keys).sort((a, b) => {
+                if (a === FYS_KEY) return -1;
+                if (b === FYS_KEY) return 1;
+                return a.localeCompare(b);
+            });
+        }
+
+        function isFYSCourse(courseNumber) {
+            return FYS_PREFIXES.has(getCoursePrefix(courseNumber));
+        }
+
+        // Campaign Name looks like "FA25 - Session I " -> Semester FA25, Session "Session I".
+        // Both values are shown in editable fields so an unexpected campaign name
+        // can be corrected before exporting.
+        function deriveSemesterSession(campaignName) {
+            const raw = (campaignName || '').trim();
+            const idx = raw.indexOf(' - ');
+            if (idx > -1) {
+                return { semester: raw.slice(0, idx).trim(), session: raw.slice(idx + 3).trim() };
             }
-            
-            return departments;
+            return { semester: raw, session: '' };
         }
 
         function processCSV(csvContent) {
@@ -893,6 +1043,8 @@
             const facultyDepartmentStats = new Map(); // Track faculty stats per department
             const departmentStats = new Map();
             const courseStats = new Map();
+            const exportRows = [];        // one entry per report, for the Tableau export
+            const campaignNames = new Map();
 
             data.forEach(row => {
                 if (!row['Student ID'] || !row['Professor Requested ID']) return;
@@ -905,7 +1057,34 @@
                 const courseNumber = row['Course Number'];
                 const courseName = row['Course Name'];
                 const responded = row['Responded'] === 'Yes';
-                const departments = getDepartments(courseNumber);
+
+                // v3.3: exactly one real department per row. FYS is tracked in
+                // parallel under FYS_KEY so it can be viewed and exported
+                // separately without being counted as a department.
+                const department = getDepartment(courseNumber);
+                const isFYS = isFYSCourse(courseNumber);
+                const departments = isFYS ? [department, FYS_KEY] : [department];
+
+                campaignNames.set(row['Campaign Name'] || '',
+                    (campaignNames.get(row['Campaign Name'] || '') || 0) + 1);
+
+                // Retained per-report detail for the Tableau export.
+                exportRows.push({
+                    campaignName: row['Campaign Name'] || '',
+                    studentId: row['Student ID'],
+                    facultyId: facultyId,
+                    facultyName: facultyName,
+                    facultyEmail: facultyEmail,
+                    courseNumber: courseNumber,
+                    courseName: courseName,
+                    coursePrefix: getCoursePrefix(courseNumber),
+                    sectionName: row['Section Name'] || '',
+                    department: department,
+                    isFYS: isFYS,
+                    responded: responded,
+                    respondedDate: row['Responded Date'] || '',
+                    notifications: row['How Many Notifications Sent'] || ''
+                });
 
                 // Track overall faculty stats (for overview) - count once per row
                 if (!facultyMap.has(facultyId)) {
@@ -918,7 +1097,7 @@
                     });
                 }
                 const faculty = facultyMap.get(facultyId);
-                departments.forEach(dept => faculty.departments.add(dept));
+                faculty.departments.add(department);   // real department only
                 faculty.reportsSent++;
                 if (responded) faculty.reportsCompleted++;
                 faculty.courses.add(courseNumber);
@@ -987,6 +1166,14 @@
                 if (faculty.reportsCompleted > 0) totalFacultyCompleted++;
             });
 
+            // Most frequent campaign name drives the auto-filled Semester/Session.
+            let topCampaign = '';
+            let topCampaignCount = -1;
+            campaignNames.forEach((count, name) => {
+                if (count > topCampaignCount) { topCampaignCount = count; topCampaign = name; }
+            });
+            const derived = deriveSemesterSession(topCampaign);
+
             processedData = {
                 students: students,
                 facultyMap: facultyMap,
@@ -995,7 +1182,12 @@
                 courseStats: courseStats,
                 totalStudents: students.size,
                 totalFaculty: facultyMap.size,
-                totalFacultyCompleted: totalFacultyCompleted
+                totalFacultyCompleted: totalFacultyCompleted,
+                exportRows: exportRows,
+                campaignName: topCampaign,
+                campaignCount: campaignNames.size,
+                semester: derived.semester,
+                session: derived.session
             };
 
             renderOverview();
@@ -1036,6 +1228,25 @@
                         </button>
                     </div>
                 </div>
+                <div class="tableau-export-bar">
+                    <div class="tableau-export-field">
+                        <label for="exportSemester">Semester</label>
+                        <input type="text" id="exportSemester" value="${processedData.semester}"
+                               oninput="updateTableauHint()">
+                    </div>
+                    <div class="tableau-export-field">
+                        <label for="exportSession">Session</label>
+                        <input type="text" id="exportSession" value="${processedData.session}"
+                               oninput="updateTableauHint()">
+                    </div>
+                    <button class="export-button csv-export-button" onclick="exportTableauCSV()">
+                        <svg fill="white" viewBox="0 0 24 24">
+                            <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20M10,17L8,15L11,12L8,9L10,7L14,11L10,17Z"/>
+                        </svg>
+                        Export Tableau CSV
+                    </button>
+                    <div class="tableau-export-hint" id="tableauHint"></div>
+                </div>
                 <div class="stats-grid">
                     <div class="stat-card">
                         <div class="stat-label">Total Students</div>
@@ -1065,7 +1276,10 @@
                     <tbody>
             `;
 
+            // FYS is excluded here: its reports already sit inside the home
+            // departments below, so listing it would count them twice.
             const sortedDepts = Array.from(processedData.departmentStats.entries())
+                .filter(([dept]) => dept !== FYS_KEY)
                 .sort((a, b) => a[0].localeCompare(b[0]));
 
             sortedDepts.forEach(([dept, stats]) => {
@@ -1089,7 +1303,55 @@
                 </table>
             `;
 
+            // First Year Seminar view. FYS is not a department as of v3.3, so it
+            // gets its own summary; these reports are also included in the home
+            // department rows above.
+            const fys = processedData.departmentStats.get(FYS_KEY);
+            if (fys) {
+                const fysFaculty = fys.facultyIds.size;
+                const fysParticipated = fys.facultyCompleted.size;
+                const fysPartRate = fysFaculty > 0 ? ((fysParticipated / fysFaculty) * 100).toFixed(1) : '0.0';
+                const fysCompRate = fys.totalReports > 0 ? ((fys.completedReports / fys.totalReports) * 100).toFixed(1) : '0.0';
+
+                html += `
+                    <div class="fys-summary">
+                        <h3>First Year Seminar</h3>
+                        <div class="fys-note">
+                            FYS courses are counted in their home department above. These figures
+                            cover First Year Seminar sections only.
+                        </div>
+                        <div class="fys-metrics">
+                            <div class="fys-metric">
+                                <div class="fys-metric-label">Faculty Sent Reports</div>
+                                <div class="fys-metric-value">${fysFaculty.toLocaleString()}</div>
+                            </div>
+                            <div class="fys-metric">
+                                <div class="fys-metric-label">Faculty Participated</div>
+                                <div class="fys-metric-value">${fysParticipated.toLocaleString()}</div>
+                            </div>
+                            <div class="fys-metric">
+                                <div class="fys-metric-label">Participation Rate</div>
+                                <div class="fys-metric-value">${fysPartRate}%</div>
+                            </div>
+                            <div class="fys-metric">
+                                <div class="fys-metric-label">Reports Sent</div>
+                                <div class="fys-metric-value">${fys.totalReports.toLocaleString()}</div>
+                            </div>
+                            <div class="fys-metric">
+                                <div class="fys-metric-label">Reports Completed</div>
+                                <div class="fys-metric-value">${fys.completedReports.toLocaleString()}</div>
+                            </div>
+                            <div class="fys-metric">
+                                <div class="fys-metric-label">Completion Rate</div>
+                                <div class="fys-metric-value">${fysCompRate}%</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
             container.innerHTML = html;
+            updateTableauHint();
         }
 
         function renderFacultyDetail() {
@@ -1148,7 +1410,7 @@
             });
 
             // Sort departments alphabetically
-            const sortedDepts = Array.from(facultyByDept.keys()).sort();
+            const sortedDepts = sortDepartmentKeys(facultyByDept.keys());
 
             // Create dropdown items
             setTimeout(() => {
@@ -1188,8 +1450,10 @@
                 const facultyCount = deptStats ? deptStats.facultyIds.size : facultyList.length;
                 const facultyParticipated = deptStats ? deptStats.facultyCompleted.size : 0;
                 
+                const sectionClass = dept === FYS_KEY ? 'department-section fys-section' : 'department-section';
+
                 html += `
-                    <div class="department-section">
+                    <div class="${sectionClass}">
                         <div class="department-header" onclick="toggleDepartment('faculty-dept-${deptIndex}', this)">
                             <div class="department-name">
                                 <span class="expand-icon">▶</span>
@@ -1306,7 +1570,7 @@
             });
 
             // Sort departments
-            const sortedDepts = Array.from(coursesByDept.keys()).sort();
+            const sortedDepts = sortDepartmentKeys(coursesByDept.keys());
 
             sortedDepts.forEach((dept, deptIndex) => {
                 const courses = coursesByDept.get(dept);
@@ -1321,8 +1585,10 @@
                 });
                 const deptRate = totalSent > 0 ? ((totalCompleted / totalSent) * 100).toFixed(1) : '0.0';
 
+                const sectionClass = dept === FYS_KEY ? 'department-section fys-section' : 'department-section';
+
                 html += `
-                    <div class="department-section">
+                    <div class="${sectionClass}">
                         <div class="department-header" onclick="toggleDepartment('course-dept-${deptIndex}', this)">
                             <div class="department-name">
                                 <span class="expand-icon">▶</span>
@@ -1511,6 +1777,122 @@
         });
 
         // PDF Export Functions
+        // ---------------------------------------------------------------
+        // Tableau export (v3.3)
+        // One row per report - no department duplication - with faculty-level
+        // participation flags precomputed so the workbook needs no LOD calcs.
+        // ---------------------------------------------------------------
+
+        // Keeps export filenames tidy for the FYS pseudo-department.
+        function deptFileLabel(dept) {
+            return dept === FYS_KEY ? 'FYS' : dept.replace(/\s+/g, '_');
+        }
+
+        function tableauFileName(semester, session) {
+            const clean = v => (v || '').trim().replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+            const parts = [clean(semester), clean(session)].filter(Boolean);
+            return parts.join('_') + '_progress_reports_clean.csv';
+        }
+
+        function updateTableauHint() {
+            const hint = document.getElementById('tableauHint');
+            if (!hint || !processedData) return;
+
+            const semester = (document.getElementById('exportSemester') || {}).value || '';
+            const session = (document.getElementById('exportSession') || {}).value || '';
+            const rows = processedData.exportRows.length.toLocaleString();
+
+            let warning = '';
+            if (processedData.campaignCount > 1) {
+                warning = ` <strong style="color:#dc354d;">This file contains ${processedData.campaignCount} campaigns;
+                            confirm the Semester and Session above.</strong>`;
+            }
+
+            hint.innerHTML = `Exports <code>${tableauFileName(semester, session)}</code> &mdash; ${rows} rows,
+                              one per progress report. Auto-filled from Campaign Name
+                              &ldquo;${processedData.campaignName.trim()}&rdquo;.${warning}`;
+        }
+
+        function csvCell(value) {
+            const text = value === null || value === undefined ? '' : String(value);
+            return /[",\n\r]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+        }
+
+        function exportTableauCSV() {
+            if (!processedData) return;
+
+            const semester = (document.getElementById('exportSemester').value || '').trim();
+            const session = (document.getElementById('exportSession').value || '').trim();
+
+            if (!semester || !session) {
+                alert('Please enter both a Semester (e.g. FA25) and a Session (e.g. Session I) before exporting.');
+                return;
+            }
+
+            const headers = [
+                'Semester', 'Session', 'Campaign Name', 'Student ID',
+                'Professor ID', 'Professor Name', 'Professor Email',
+                'Course Number', 'Course Name', 'Course Prefix', 'Section Name',
+                'Academic Department', 'Is FYS Course',
+                'Responded', 'Responded Flag', 'Responded Date', 'How Many Notifications Sent',
+                'Faculty Reports Sent in Dept', 'Faculty Reports Completed in Dept', 'Faculty Participated in Dept',
+                'Faculty Reports Sent in FYS', 'Faculty Reports Completed in FYS', 'Faculty Participated in FYS',
+                'Faculty Reports Sent Overall', 'Faculty Reports Completed Overall', 'Faculty Participated Overall'
+            ];
+
+            const lines = [headers.join(',')];
+
+            processedData.exportRows.forEach(row => {
+                const deptStat = processedData.facultyDepartmentStats.get(`${row.facultyId}|${row.department}`);
+                const fysStat = processedData.facultyDepartmentStats.get(`${row.facultyId}|${FYS_KEY}`);
+                const overall = processedData.facultyMap.get(row.facultyId);
+
+                const deptSent = deptStat ? deptStat.reportsSent : 0;
+                const deptDone = deptStat ? deptStat.reportsCompleted : 0;
+                const fysSent = fysStat ? fysStat.reportsSent : 0;
+                const fysDone = fysStat ? fysStat.reportsCompleted : 0;
+                const allSent = overall ? overall.reportsSent : 0;
+                const allDone = overall ? overall.reportsCompleted : 0;
+
+                lines.push([
+                    semester,
+                    session,
+                    row.campaignName.trim(),
+                    row.studentId,
+                    row.facultyId,
+                    row.facultyName,
+                    row.facultyEmail,
+                    row.courseNumber,
+                    row.courseName,
+                    row.coursePrefix,
+                    row.sectionName,
+                    row.department,
+                    row.isFYS ? 'Yes' : 'No',
+                    row.responded ? 'Yes' : 'No',
+                    row.responded ? 1 : 0,
+                    row.respondedDate,
+                    row.notifications,
+                    deptSent,
+                    deptDone,
+                    deptDone > 0 ? 'Yes' : 'No',
+                    fysSent,
+                    fysDone,
+                    fysDone > 0 ? 'Yes' : 'No',
+                    allSent,
+                    allDone,
+                    allDone > 0 ? 'Yes' : 'No'
+                ].map(csvCell).join(','));
+            });
+
+            // BOM keeps accented names readable when the file is opened in Excel.
+            const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = tableauFileName(semester, session);
+            link.click();
+            URL.revokeObjectURL(link.href);
+        }
+
         function exportOverviewToPDF() {
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
@@ -1733,7 +2115,7 @@
             const month = String(today.getMonth() + 1).padStart(2, '0');
             const year = String(today.getFullYear()).slice(-2);
             const dateStr = `${month}.${day}.${year}`;
-            const deptName = department.replace(/\s+/g, '_');
+            const deptName = deptFileLabel(department);
             doc.save(`Progress Report Participation_${deptName}_${dateStr}.pdf`);
         }
 
@@ -1941,7 +2323,7 @@
             const month = String(today.getMonth() + 1).padStart(2, '0');
             const year = String(today.getFullYear()).slice(-2);
             const dateStr = `${month}.${day}.${year}`;
-            const deptName = department.replace(/\s+/g, '_');
+            const deptName = deptFileLabel(department);
             doc.save(`Progress Report Course Analysis_${deptName}_${dateStr}.pdf`);
         }
 
@@ -1951,7 +2333,7 @@
             processedData.facultyDepartmentStats.forEach((faculty, key) => {
                 departments.add(faculty.department);
             });
-            const sortedDepts = Array.from(departments).sort();
+            const sortedDepts = sortDepartmentKeys(departments);
 
             const today = new Date();
             const day = String(today.getDate()).padStart(2, '0');
@@ -1963,7 +2345,7 @@
             const zip = new JSZip();
             sortedDepts.forEach(dept => {
                 const pdfBlob = exportDepartmentToPDF(dept, true);
-                const deptName = dept.replace(/\s+/g, '_');
+                const deptName = deptFileLabel(dept);
                 zip.file(`Progress Report Participation_${deptName}_${dateStr}.pdf`, pdfBlob);
             });
 
@@ -2018,7 +2400,7 @@
             const month = String(today.getMonth() + 1).padStart(2, '0');
             const year = String(today.getFullYear()).slice(-2);
             const dateStr = `${month}.${day}.${year}`;
-            const deptName = department.replace(/\s+/g, '_');
+            const deptName = deptFileLabel(department);
             link.href = URL.createObjectURL(blob);
             link.download = `Non-Respondents_${deptName}_${dateStr}.csv`;
             link.click();
@@ -2031,7 +2413,7 @@
             processedData.facultyDepartmentStats.forEach((faculty, key) => {
                 departments.add(faculty.department);
             });
-            const sortedDepts = Array.from(departments).sort();
+            const sortedDepts = sortDepartmentKeys(departments);
 
             const today = new Date();
             const day = String(today.getDate()).padStart(2, '0');
@@ -2045,7 +2427,7 @@
             sortedDepts.forEach(dept => {
                 const csvContent = exportNonRespondentsCSV(dept, true);
                 if (csvContent) {
-                    const deptName = dept.replace(/\s+/g, '_');
+                    const deptName = deptFileLabel(dept);
                     zip.file(`Non-Respondents_${deptName}_${dateStr}.csv`, csvContent);
                     hasAny = true;
                 }
