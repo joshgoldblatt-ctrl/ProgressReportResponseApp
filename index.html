@@ -2,12 +2,40 @@
 <!--
 ================================================================================
   App:          LaGuardia Faculty Progress Report Response App
-  Version:      3.3
+  Version:      3.4
   Released:     July 27, 2026
   Developed by: Josh Goldblatt using Claude
 ================================================================================
   CHANGELOG (most recent first)
 --------------------------------------------------------------------------------
+  v3.4  2026-07-27
+    - Added two columns to the Tableau export: "Term" (compact combined label,
+      e.g. FA25_I) and "Term Sort Key" (numeric, e.g. 202531). The sort key puts
+      terms in true chronological order on a Tableau axis, which an alphabetical
+      sort of the label cannot do (FA26 would otherwise precede SP26 even though
+      it follows it). Formula: (2000 + YY) * 100 + term rank * 10 + session
+      number, where SP = 1 and FA = 3. Rank 2 is deliberately left unused so a
+      summer term can be added later without renumbering existing keys.
+    - Export filename now matches the Term label:
+      <TERM>_progress_reports_clean.csv (e.g. FA25_I_progress_reports_clean.csv),
+      replacing the longer FA25_Session_I_ form used in v3.3.
+    - BREAKING FOR EXISTING TABLEAU FOLDERS: files exported by v3.3 lack the two
+      new columns. In a wildcard union Tableau fills the gap with nulls silently
+      rather than erroring, so any v3.3 file already in the OneDrive folder must
+      be re-exported from v3.4 and replaced.
+    - Semester and Session are no longer both free text. Semester remains a text
+      field but is validated against the FA25 / SP26 pattern (two letters, two
+      digits) and is upper-cased on export; an invalid value is flagged inline
+      and blocks the export rather than producing an unusable sort key. Session
+      is now a dropdown limited to I and II.
+    - The derived Term is displayed read-only beside the two fields, so a
+      malformed Campaign Name is visible before exporting rather than after.
+    - deriveSemesterSession() now returns the bare session numeral ('I' / 'II')
+      instead of the full 'Session I' text, to match the dropdown values. It
+      tests for 'II' before 'I' so that 'Session II' is not read as Session I.
+    - Semester and Session remain separate columns in the export. Term is
+      additional, not a replacement: collapsing them would force a parsing
+      calculation in Tableau to filter on a semester across sessions.
   v3.3  2026-07-27
     - DEPARTMENT MODEL CHANGE: First Year Seminar courses no longer form their
       own "FYS" department. Each FYS course now counts ONLY in its home academic
@@ -84,7 +112,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LaGuardia Faculty Progress Report Response App_3.3</title>
+    <title>LaGuardia Faculty Progress Report Response App_3.4</title>
     <!-- Add jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
@@ -667,6 +695,45 @@
             font-family: inherit;
             width: 150px;
         }
+        .tableau-export-field select {
+            padding: 8px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            font-size: 0.95em;
+            font-family: inherit;
+            background: white;
+            width: 150px;
+            cursor: pointer;
+        }
+        .tableau-export-field select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .field-hint {
+            font-size: 0.75em;
+            color: #6c757d;
+            min-height: 14px;
+        }
+        .field-hint-error {
+            color: #dc354d;
+            font-weight: 600;
+        }
+        .term-display {
+            padding: 8px 12px;
+            border: 1px dashed #ced4da;
+            border-radius: 6px;
+            font-size: 0.95em;
+            font-weight: 700;
+            color: #495057;
+            background: #eef0f5;
+            width: 150px;
+            box-sizing: border-box;
+        }
+        .term-display-invalid {
+            color: #dc354d;
+            background: #fdeaec;
+            border-color: #f3b6bd;
+        }
         .tableau-export-field input:focus {
             outline: none;
             border-color: #667eea;
@@ -695,7 +762,7 @@
     <div class="container">
         <div class="header">
             <h1>📊 LaGuardia Faculty Progress Report Response App</h1>
-            <div class="subtitle">Version 3.3 — Released July 27, 2026</div>
+            <div class="subtitle">Version 3.4 — Released July 27, 2026</div>
             <div class="subtitle">Developed by Josh Goldblatt using Claude</div>
         </div>
 
@@ -1028,10 +1095,37 @@
         function deriveSemesterSession(campaignName) {
             const raw = (campaignName || '').trim();
             const idx = raw.indexOf(' - ');
-            if (idx > -1) {
-                return { semester: raw.slice(0, idx).trim(), session: raw.slice(idx + 3).trim() };
+            const semester = (idx > -1 ? raw.slice(0, idx) : raw).trim().toUpperCase();
+            const sessionText = idx > -1 ? raw.slice(idx + 3) : '';
+
+            // Test for II before I - otherwise 'Session II' matches as Session I.
+            let session = 'I';
+            if (/\bII\b/.test(sessionText) || /2/.test(sessionText)) {
+                session = 'II';
             }
-            return { semester: raw, session: '' };
+            return { semester: semester, session: session };
+        }
+
+        // Semester must be two term letters plus a two-digit year, e.g. FA25 / SP26.
+        function isValidSemester(semester) {
+            return /^(FA|SP)\d{2}$/.test((semester || '').trim().toUpperCase());
+        }
+
+        // Compact combined label used on Tableau axes and in the export filename.
+        function termLabel(semester, session) {
+            return (semester || '').trim().toUpperCase() + '_' + (session || '');
+        }
+
+        // Numeric key giving true chronological order. Spring precedes Fall within
+        // a calendar year. Rank 2 is left free for a future summer term so existing
+        // keys never have to be renumbered.
+        function termSortKey(semester, session) {
+            const match = (semester || '').trim().toUpperCase().match(/^(FA|SP)(\d{2})$/);
+            if (!match) return '';
+            const year = 2000 + parseInt(match[2], 10);
+            const termRank = match[1] === 'SP' ? 1 : 3;
+            const sessionNumber = session === 'II' ? 2 : 1;
+            return year * 100 + termRank * 10 + sessionNumber;
         }
 
         function processCSV(csvContent) {
@@ -1232,12 +1326,21 @@
                     <div class="tableau-export-field">
                         <label for="exportSemester">Semester</label>
                         <input type="text" id="exportSemester" value="${processedData.semester}"
-                               oninput="updateTableauHint()">
+                               placeholder="FA25" maxlength="4" oninput="updateTableauHint()">
+                        <span class="field-hint" id="semesterHint">Format: FA25 or SP26</span>
                     </div>
                     <div class="tableau-export-field">
                         <label for="exportSession">Session</label>
-                        <input type="text" id="exportSession" value="${processedData.session}"
-                               oninput="updateTableauHint()">
+                        <select id="exportSession" onchange="updateTableauHint()">
+                            <option value="I" ${processedData.session === 'II' ? '' : 'selected'}>I</option>
+                            <option value="II" ${processedData.session === 'II' ? 'selected' : ''}>II</option>
+                        </select>
+                        <span class="field-hint">&nbsp;</span>
+                    </div>
+                    <div class="tableau-export-field">
+                        <label>Term</label>
+                        <div class="term-display" id="termDisplay"></div>
+                        <span class="field-hint">&nbsp;</span>
                     </div>
                     <button class="export-button csv-export-button" onclick="exportTableauCSV()">
                         <svg fill="white" viewBox="0 0 24 24">
@@ -1789,19 +1892,44 @@
         }
 
         function tableauFileName(semester, session) {
-            const clean = v => (v || '').trim().replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-            const parts = [clean(semester), clean(session)].filter(Boolean);
-            return parts.join('_') + '_progress_reports_clean.csv';
+            return termLabel(semester, session) + '_progress_reports_clean.csv';
         }
 
         function updateTableauHint() {
             const hint = document.getElementById('tableauHint');
             if (!hint || !processedData) return;
 
-            const semester = (document.getElementById('exportSemester') || {}).value || '';
-            const session = (document.getElementById('exportSession') || {}).value || '';
-            const rows = processedData.exportRows.length.toLocaleString();
+            const semesterField = document.getElementById('exportSemester');
+            const sessionField = document.getElementById('exportSession');
+            const semester = ((semesterField || {}).value || '').trim().toUpperCase();
+            const session = (sessionField || {}).value || 'I';
 
+            const valid = isValidSemester(semester);
+            const term = termLabel(semester, session);
+
+            const termBox = document.getElementById('termDisplay');
+            if (termBox) {
+                termBox.textContent = valid ? term : '\u2014';
+                termBox.className = valid ? 'term-display' : 'term-display term-display-invalid';
+            }
+
+            const semesterHint = document.getElementById('semesterHint');
+            if (semesterHint) {
+                const bad = semester && !valid;
+                semesterHint.textContent = bad
+                    ? 'Two term letters plus a two-digit year'
+                    : 'Format: FA25 or SP26';
+                semesterHint.className = bad ? 'field-hint field-hint-error' : 'field-hint';
+            }
+
+            if (!valid) {
+                hint.innerHTML = `<strong style="color:#dc354d;">Enter a valid Semester to enable the export.</strong>
+                                  Auto-filled from Campaign Name
+                                  &ldquo;${processedData.campaignName.trim()}&rdquo;.`;
+                return;
+            }
+
+            const rows = processedData.exportRows.length.toLocaleString();
             let warning = '';
             if (processedData.campaignCount > 1) {
                 warning = ` <strong style="color:#dc354d;">This file contains ${processedData.campaignCount} campaigns;
@@ -1809,7 +1937,8 @@
             }
 
             hint.innerHTML = `Exports <code>${tableauFileName(semester, session)}</code> &mdash; ${rows} rows,
-                              one per progress report. Auto-filled from Campaign Name
+                              one per progress report. Term <code>${term}</code>, sort key
+                              <code>${termSortKey(semester, session)}</code>. Auto-filled from Campaign Name
                               &ldquo;${processedData.campaignName.trim()}&rdquo;.${warning}`;
         }
 
@@ -1821,16 +1950,19 @@
         function exportTableauCSV() {
             if (!processedData) return;
 
-            const semester = (document.getElementById('exportSemester').value || '').trim();
-            const session = (document.getElementById('exportSession').value || '').trim();
+            const semester = (document.getElementById('exportSemester').value || '').trim().toUpperCase();
+            const session = document.getElementById('exportSession').value || 'I';
 
-            if (!semester || !session) {
-                alert('Please enter both a Semester (e.g. FA25) and a Session (e.g. Session I) before exporting.');
+            if (!isValidSemester(semester)) {
+                alert('Semester must be two term letters plus a two-digit year, for example FA25 or SP26.');
                 return;
             }
 
+            const term = termLabel(semester, session);
+            const sortKey = termSortKey(semester, session);
+
             const headers = [
-                'Semester', 'Session', 'Campaign Name', 'Student ID',
+                'Semester', 'Session', 'Term', 'Term Sort Key', 'Campaign Name', 'Student ID',
                 'Professor ID', 'Professor Name', 'Professor Email',
                 'Course Number', 'Course Name', 'Course Prefix', 'Section Name',
                 'Academic Department', 'Is FYS Course',
@@ -1857,6 +1989,8 @@
                 lines.push([
                     semester,
                     session,
+                    term,
+                    sortKey,
                     row.campaignName.trim(),
                     row.studentId,
                     row.facultyId,
