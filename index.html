@@ -2,12 +2,46 @@
 <!--
 ================================================================================
   App:          LaGuardia Faculty Progress Report Response App
-  Version:      3.5
+  Version:      3.6
   Released:     November 3, 2026
   Developed by: Josh Goldblatt using Claude
 ================================================================================
   CHANGELOG (most recent first)
 --------------------------------------------------------------------------------
+  v3.6  2026-11-03
+    - Added six columns to the Tableau export, all for day-by-day progress
+      charts. Appended at the end so no existing column changes position:
+        Campaign Start Date              - the row's Campaign Creation Date
+        Days Since Campaign Start        - days from campaign start to this
+                                           report's response; blank if unanswered
+        Faculty First Response Date      - earliest response by this faculty
+                                           member anywhere in the campaign
+        Faculty First Response Date in Dept  - earliest in THIS department
+        Faculty First Response Date in FYS   - earliest in an FYS course
+        Faculty Days to First Response   - days from campaign start to that
+                                           first response; blank if none
+    - Rationale: a faculty member's first-response date is a fact about the
+      person, like the participation flags, so it is computed here rather than
+      left to a Tableau FIXED LOD. It also removes a real trap - an LOD keyed on
+      professor alone returns the earliest response across EVERY term in a
+      wildcard union, which silently flattens later terms' adoption curves.
+    - The three first-response dates mirror the three participation flags and
+      follow the same scope rule: "in Dept" is per faculty-department pair, so a
+      faculty member teaching in two departments can have two different first
+      dates; "in FYS" is blank for faculty with no FYS courses.
+    - Days Since Campaign Start / Days to First Response put every term's
+      adoption curve on one 0-to-N-day axis, which a calendar date axis cannot
+      do - different terms occupy different months and never overlap.
+    - Campaign Start Date is read per row rather than once per file, so a file
+      containing more than one campaign still measures each row against its own
+      campaign. The multi-campaign warning on the export bar is unchanged.
+    - Dates are written in the source MM/DD/YYYY format, matching the existing
+      Responded Date column. Day counts are whole numbers; 0 means the response
+      came on the campaign's start date.
+    - IMPACT FOR EXISTING TABLEAU FOLDERS: files exported by v3.5 or earlier lack
+      these six columns. In a wildcard union Tableau fills them with nulls
+      silently rather than erroring, so re-export and replace every file in the
+      OneDrive folder.
   v3.5  2026-11-03
     - Added HUZ -> HUM to the course prefix mapping so HUZ courses count in the
       Humanities department instead of "Unknown". Mapping change only: no other
@@ -120,7 +154,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LaGuardia Faculty Progress Report Response App_3.5</title>
+    <title>LaGuardia Faculty Progress Report Response App_3.6</title>
     <!-- Add jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
@@ -770,7 +804,7 @@
     <div class="container">
         <div class="header">
             <h1>📊 LaGuardia Faculty Progress Report Response App</h1>
-            <div class="subtitle">Version 3.5 — Released November 3, 2026</div>
+            <div class="subtitle">Version 3.6 — Released November 3, 2026</div>
             <div class="subtitle">Developed by Josh Goldblatt using Claude</div>
         </div>
 
@@ -1116,6 +1150,39 @@
         }
 
         // Semester must be two term letters plus a two-digit year, e.g. FA25 / SP26.
+        // Parses the MM/DD/YYYY dates in the Navigate export. Returns a sortable
+        // key, the original text for display, and a UTC millisecond value for day
+        // arithmetic. UTC avoids any daylight-saving shift in the day counts.
+        function parseExportDate(value) {
+            const m = (value || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+            if (!m) return null;
+            const month = m[1].padStart(2, '0');
+            const day = m[2].padStart(2, '0');
+            return {
+                key: m[3] + month + day,
+                text: (value || '').trim(),
+                utc: Date.UTC(parseInt(m[3], 10), parseInt(m[1], 10) - 1, parseInt(m[2], 10))
+            };
+        }
+
+        // Whole days between two UTC values; blank when either side is missing.
+        function daysBetween(fromUtc, toUtc) {
+            if (fromUtc === null || fromUtc === undefined) return '';
+            if (toUtc === null || toUtc === undefined) return '';
+            return Math.round((toUtc - fromUtc) / 86400000);
+        }
+
+        // Keeps the earliest response seen so far on a faculty or faculty-department
+        // record. Called for responded rows only.
+        function noteFirstResponse(target, parsed) {
+            if (!parsed) return;
+            if (!target.firstResponseKey || parsed.key < target.firstResponseKey) {
+                target.firstResponseKey = parsed.key;
+                target.firstResponseText = parsed.text;
+                target.firstResponseUtc = parsed.utc;
+            }
+        }
+
         function isValidSemester(semester) {
             return /^(FA|SP)\d{2}$/.test((semester || '').trim().toUpperCase());
         }
@@ -1160,6 +1227,8 @@
                 const courseNumber = row['Course Number'];
                 const courseName = row['Course Name'];
                 const responded = row['Responded'] === 'Yes';
+                const respondedOn = responded ? parseExportDate(row['Responded Date']) : null;
+                const campaignStart = parseExportDate(row['Campaign Creation Date']);
 
                 // v3.3: exactly one real department per row. FYS is tracked in
                 // parallel under FYS_KEY so it can be viewed and exported
@@ -1186,7 +1255,10 @@
                     isFYS: isFYS,
                     responded: responded,
                     respondedDate: row['Responded Date'] || '',
-                    notifications: row['How Many Notifications Sent'] || ''
+                    notifications: row['How Many Notifications Sent'] || '',
+                    campaignStartText: campaignStart ? campaignStart.text : '',
+                    campaignStartUtc: campaignStart ? campaignStart.utc : null,
+                    respondedUtc: respondedOn ? respondedOn.utc : null
                 });
 
                 // Track overall faculty stats (for overview) - count once per row
@@ -1196,10 +1268,19 @@
                         departments: new Set(),
                         reportsSent: 0,
                         reportsCompleted: 0,
-                        courses: new Set()
+                        courses: new Set(),
+                        firstResponseKey: '',
+                        firstResponseText: '',
+                        firstResponseUtc: null,
+                        campaignStartUtc: null
                     });
                 }
                 const faculty = facultyMap.get(facultyId);
+                if (campaignStart && (faculty.campaignStartUtc === null
+                        || campaignStart.utc < faculty.campaignStartUtc)) {
+                    faculty.campaignStartUtc = campaignStart.utc;
+                }
+                if (responded) noteFirstResponse(faculty, respondedOn);
                 faculty.departments.add(department);   // real department only
                 faculty.reportsSent++;
                 if (responded) faculty.reportsCompleted++;
@@ -1216,10 +1297,14 @@
                             email: facultyEmail,
                             department: department,
                             reportsSent: 0,
-                            reportsCompleted: 0
+                            reportsCompleted: 0,
+                            firstResponseKey: '',
+                            firstResponseText: '',
+                            firstResponseUtc: null
                         });
                     }
                     const facultyDept = facultyDepartmentStats.get(facultyDeptKey);
+                    if (responded) noteFirstResponse(facultyDept, respondedOn);
                     facultyDept.reportsSent++;
                     if (responded) facultyDept.reportsCompleted++;
                     // Update email if we didn't have it before
@@ -1978,7 +2063,10 @@
                 'Responded', 'Responded Flag', 'Responded Date', 'How Many Notifications Sent',
                 'Faculty Reports Sent in Dept', 'Faculty Reports Completed in Dept', 'Faculty Participated in Dept',
                 'Faculty Reports Sent in FYS', 'Faculty Reports Completed in FYS', 'Faculty Participated in FYS',
-                'Faculty Reports Sent Overall', 'Faculty Reports Completed Overall', 'Faculty Participated Overall'
+                'Faculty Reports Sent Overall', 'Faculty Reports Completed Overall', 'Faculty Participated Overall',
+                'Campaign Start Date', 'Days Since Campaign Start',
+                'Faculty First Response Date', 'Faculty First Response Date in Dept',
+                'Faculty First Response Date in FYS', 'Faculty Days to First Response'
             ];
 
             const lines = [headers.join(',')];
@@ -2023,7 +2111,13 @@
                     fysDone > 0 ? 'Yes' : 'No',
                     allSent,
                     allDone,
-                    allDone > 0 ? 'Yes' : 'No'
+                    allDone > 0 ? 'Yes' : 'No',
+                    row.campaignStartText,
+                    daysBetween(row.campaignStartUtc, row.respondedUtc),
+                    overall ? (overall.firstResponseText || '') : '',
+                    deptStat ? (deptStat.firstResponseText || '') : '',
+                    fysStat ? (fysStat.firstResponseText || '') : '',
+                    overall ? daysBetween(overall.campaignStartUtc, overall.firstResponseUtc) : ''
                 ].map(csvCell).join(','));
             });
 
