@@ -2,12 +2,20 @@
 <!--
 ================================================================================
   App:          LaGuardia Faculty Progress Report Response App
-  Version:      3.4
-  Released:     July 27, 2026
+  Version:      3.5
+  Released:     November 3, 2026
   Developed by: Josh Goldblatt using Claude
 ================================================================================
   CHANGELOG (most recent first)
 --------------------------------------------------------------------------------
+  v3.5  2026-11-03
+    - Added HUZ -> HUM to the course prefix mapping so HUZ courses count in the
+      Humanities department instead of "Unknown". Mapping change only: no other
+      logic, export columns, or filenames changed.
+    - IMPACT FOR EXISTING TABLEAU FOLDERS: files exported by v3.4 or earlier show
+      HUZ rows as "Unknown" in Academic Department, and faculty teaching HUZ are
+      counted outside Humanities. Re-export from v3.5 and replace any affected
+      file in the OneDrive folder.
   v3.4  2026-07-27
     - Added two columns to the Tableau export: "Term" (compact combined label,
       e.g. FA25_I) and "Term Sort Key" (numeric, e.g. 202531). The sort key puts
@@ -112,7 +120,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LaGuardia Faculty Progress Report Response App_3.4</title>
+    <title>LaGuardia Faculty Progress Report Response App_3.5</title>
     <!-- Add jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
@@ -762,7 +770,7 @@
     <div class="container">
         <div class="header">
             <h1>📊 LaGuardia Faculty Progress Report Response App</h1>
-            <div class="subtitle">Version 3.4 — Released July 27, 2026</div>
+            <div class="subtitle">Version 3.5 — Released November 3, 2026</div>
             <div class="subtitle">Developed by Josh Goldblatt using Claude</div>
         </div>
 
@@ -876,6 +884,7 @@
             'HUV': 'HUM',
             'HUW': 'HUM',
             'HUX': 'HUM',
+            'HUZ': 'HUM',
             'LIB': 'LIBARTS',
             'LIN': 'LIBARTS',
             'MAC': 'MEC',
