@@ -2,12 +2,48 @@
 <!--
 ================================================================================
   App:          LaGuardia Faculty Progress Report Response App
-  Version:      3.6
-  Released:     November 3, 2026
+  Version:      3.7
+  Released:     November 24, 2026
   Developed by: Josh Goldblatt using Claude
 ================================================================================
   CHANGELOG (most recent first)
 --------------------------------------------------------------------------------
+  v3.7  2026-11-24
+    - NEW: optional second upload for a faculty status list (the Navigate/CUNY
+      "All Faculty List" export). It joins Staff ID to Professor Requested ID and
+      labels every faculty member Full-time, Part-time, or Unknown from the
+      Full_Part column (F -> Full-time, P -> Part-time).
+    - The status list is OPTIONAL and order-independent. Without it every faculty
+      member reads Unknown and the app behaves exactly as v3.6. The progress
+      report CSV is retained in memory, so uploading the status list second
+      re-processes the report rather than requiring a re-upload.
+    - Join notes: both IDs are 8-digit with no leading zeros, so the match is a
+      direct string compare after trimming. Staff ID is unique in the roster
+      (1,719 rows, no duplicates), and no filtering on Payroll_Status, Company or
+      DIVISION_DESC is applied - every faculty member matched in testing was
+      Active and in Academic Affairs, so extra filters would only risk dropping
+      valid matches. Unmatched faculty are labeled Unknown, never guessed.
+    - IMPORTANT - the status list is a point-in-time roster. Matching degrades on
+      older terms as faculty leave: testing matched 99.4% of FA26 faculty but only
+      85.3% of SP25, and the unmatched were overwhelmingly part-time (departed
+      adjuncts). Upload the roster that corresponds to the term being processed.
+      A later roster applied to an older term undercounts part-time faculty.
+    - Status now appears in: a Faculty Status summary block on the Overview tab
+      (full-time / part-time / unknown participation side by side), a Status
+      column in every Faculty Detail table, a Status column in the department PDF
+      exports, and a Status column in the non-respondent CSV exports.
+    - Tableau export gains one column, "Faculty Status", appended at the end so no
+      existing column changes position (34 -> 35 columns). Values are the readable
+      labels Full-time / Part-time / Unknown rather than the raw F/P codes, so
+      Tableau legends and filters are self-explanatory.
+    - Status is a faculty-level attribute, so it is identical on every row for a
+      given professor. In Tableau use it as a dimension on Color/Rows or as a
+      filter; the existing COUNTD-based participation measures work against it
+      with no new calculated fields.
+    - IMPACT FOR EXISTING TABLEAU FOLDERS: files exported by v3.6 or earlier lack
+      the Faculty Status column. In a wildcard union Tableau fills it with nulls
+      silently rather than erroring, so re-export and replace every file in the
+      OneDrive folder.
   v3.6  2026-11-03
     - Added six columns to the Tableau export, all for day-by-day progress
       charts. Appended at the end so no existing column changes position:
@@ -154,7 +190,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LaGuardia Faculty Progress Report Response App_3.6</title>
+    <title>LaGuardia Faculty Progress Report Response App_3.7</title>
     <!-- Add jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
@@ -667,6 +703,62 @@
             background: #e8f6f8;
             border-left: 4px solid #17a2b8;
         }
+        /* --- v3.7: faculty status list upload + status views --- */
+        .upload-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        @media (max-width: 760px) {
+            .upload-grid { grid-template-columns: 1fr; }
+        }
+        .upload-slot-label {
+            font-size: 0.8em;
+            font-weight: 700;
+            color: #6c757d;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+        .file-upload-area.secondary {
+            border-color: #17a2b8;
+            padding: 30px 40px;
+        }
+        .file-upload-area.secondary:hover {
+            border-color: #0f6674;
+            background: #f4fbfc;
+        }
+        .file-upload-area.secondary.loaded {
+            border-style: solid;
+            background: #e8f6f8;
+        }
+        .status-summary {
+            background: #f1f3f9;
+            border-left: 4px solid #667eea;
+            border-radius: 8px;
+            padding: 20px 25px;
+            margin-top: 30px;
+        }
+        .status-summary h3 {
+            color: #3b4a8c;
+            margin-bottom: 6px;
+        }
+        .status-summary .status-note {
+            color: #5a6480;
+            font-size: 0.9em;
+            margin-bottom: 15px;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+        .status-badge.full-time { background: #d9e5ff; color: #1b3a8f; }
+        .status-badge.part-time { background: #ffe8cc; color: #8a4b00; }
+        .status-badge.unknown   { background: #e9ecef; color: #6c757d; }
         .fys-summary {
             background: #e8f6f8;
             border-left: 4px solid #17a2b8;
@@ -804,18 +896,34 @@
     <div class="container">
         <div class="header">
             <h1>📊 LaGuardia Faculty Progress Report Response App</h1>
-            <div class="subtitle">Version 3.6 — Released November 3, 2026</div>
+            <div class="subtitle">Version 3.7 — Released November 24, 2026</div>
             <div class="subtitle">Developed by Josh Goldblatt using Claude</div>
         </div>
 
         <div class="upload-section">
-            <div class="file-upload-area" id="uploadArea">
-                <div class="upload-icon">📁</div>
-                <div class="upload-text">Click to upload or drag and drop</div>
-                <div class="upload-subtext">CSV files only</div>
-                <input type="file" class="file-input" id="fileInput" accept=".csv">
+            <div class="upload-grid">
+                <div>
+                    <div class="upload-slot-label">1. Progress Report CSV (required)</div>
+                    <div class="file-upload-area" id="uploadArea">
+                        <div class="upload-icon">📁</div>
+                        <div class="upload-text">Click to upload or drag and drop</div>
+                        <div class="upload-subtext">CSV files only</div>
+                        <input type="file" class="file-input" id="fileInput" accept=".csv">
+                    </div>
+                </div>
+                <div>
+                    <div class="upload-slot-label">2. Faculty Status List (optional)</div>
+                    <div class="file-upload-area secondary" id="statusUploadArea">
+                        <div class="upload-icon">🧑‍🏫</div>
+                        <div class="upload-text" id="statusUploadText">Upload the All Faculty List</div>
+                        <div class="upload-subtext" id="statusUploadSubtext">
+                            Adds Full-time / Part-time status. Needs Staff ID and Full_Part columns.
+                        </div>
+                        <input type="file" class="file-input" id="statusFileInput" accept=".csv">
+                    </div>
+                </div>
             </div>
-            
+
             <div class="progress-container" id="progressContainer">
                 <div class="progress-bar">
                     <div class="progress-fill" id="progressFill" style="width: 0%">0%</div>
@@ -823,6 +931,7 @@
             </div>
             
             <div class="file-info" id="fileInfo"></div>
+            <div class="file-info" id="statusFileInfo" style="display: none;"></div>
         </div>
 
         <div class="tabs-container" id="tabsContainer">
@@ -962,6 +1071,66 @@
         // from any institution-wide total so FYS reports are never counted twice.
         const FYS_KEY = 'FYS (First Year Seminar)';
 
+        // v3.7: faculty employment status, joined from the optional status list.
+        // UNKNOWN is used when no list is loaded or the Staff ID is not found -
+        // it is never guessed from any other field.
+        const STATUS_FULL = 'Full-time';
+        const STATUS_PART = 'Part-time';
+        const STATUS_UNKNOWN = 'Unknown';
+        const STATUS_ORDER = [STATUS_FULL, STATUS_PART, STATUS_UNKNOWN];
+
+        // Staff ID -> STATUS_FULL / STATUS_PART. Empty until a list is uploaded.
+        let facultyStatusMap = new Map();
+        let statusListName = '';
+        // The progress report CSV text is retained so uploading the status list
+        // second can re-process it without a second upload of the report.
+        let lastReportCsv = null;
+        let lastReportName = '';
+
+        function statusClass(status) {
+            if (status === STATUS_FULL) return 'full-time';
+            if (status === STATUS_PART) return 'part-time';
+            return 'unknown';
+        }
+
+        function lookupFacultyStatus(facultyId) {
+            return facultyStatusMap.get((facultyId || '').trim()) || STATUS_UNKNOWN;
+        }
+
+        // Reads the All Faculty List. Tolerates header spacing/case variants for
+        // both columns, since the roster export has shifted header spelling before.
+        function parseStatusList(csvContent) {
+            const data = parseCSV(csvContent);
+            if (!data.length) throw new Error('The status list appears to be empty.');
+
+            const headers = Object.keys(data[0]);
+            const norm = h => h.toLowerCase().replace(/[^a-z]/g, '');
+            const idHeader = headers.find(h => ['staffid', 'professorrequestedid', 'professorid', 'emplid']
+                .includes(norm(h)));
+            const fpHeader = headers.find(h => ['fullpart', 'fullparttime', 'fullptime', 'ftpt']
+                .includes(norm(h)));
+
+            if (!idHeader || !fpHeader) {
+                throw new Error('Could not find a Staff ID column and a Full_Part column. '
+                    + 'Found: ' + headers.join(', '));
+            }
+
+            const map = new Map();
+            let full = 0, part = 0, skipped = 0;
+            data.forEach(row => {
+                const id = (row[idHeader] || '').trim();
+                const code = (row[fpHeader] || '').trim().toUpperCase();
+                if (!id) { skipped++; return; }
+                if (code === 'F') { map.set(id, STATUS_FULL); full++; }
+                else if (code === 'P') { map.set(id, STATUS_PART); part++; }
+                else { skipped++; }
+            });
+            if (map.size === 0) {
+                throw new Error('No usable rows found - the Full_Part column held no F or P values.');
+            }
+            return { map, full, part, skipped, rows: data.length };
+        }
+
         let processedData = null;
 
         // File upload handling
@@ -998,6 +1167,98 @@
             }
         });
 
+        // --- v3.7: optional faculty status list ---
+        const statusUploadArea = document.getElementById('statusUploadArea');
+        const statusFileInput = document.getElementById('statusFileInput');
+        const statusFileInfo = document.getElementById('statusFileInfo');
+
+        statusUploadArea.addEventListener('click', () => statusFileInput.click());
+
+        statusUploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            statusUploadArea.classList.add('drag-over');
+        });
+
+        statusUploadArea.addEventListener('dragleave', () => {
+            statusUploadArea.classList.remove('drag-over');
+        });
+
+        statusUploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            statusUploadArea.classList.remove('drag-over');
+            if (e.dataTransfer.files.length > 0) handleStatusFile(e.dataTransfer.files[0]);
+        });
+
+        statusFileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) handleStatusFile(e.target.files[0]);
+        });
+
+        function showStatusMessage(message, isError) {
+            statusFileInfo.innerHTML = message;
+            statusFileInfo.className = isError ? 'file-info error' : 'file-info';
+            statusFileInfo.style.display = 'block';
+        }
+
+        function handleStatusFile(file) {
+            if (!file.name.toLowerCase().endsWith('.csv')) {
+                showStatusMessage('Please upload a CSV file for the faculty status list.', true);
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const result = parseStatusList(e.target.result);
+                    facultyStatusMap = result.map;
+                    statusListName = file.name;
+
+                    document.getElementById('statusUploadText').textContent = 'Status list loaded';
+                    document.getElementById('statusUploadSubtext').textContent =
+                        `${file.name} - ${result.map.size.toLocaleString()} faculty `
+                        + `(${result.full.toLocaleString()} full-time, ${result.part.toLocaleString()} part-time)`;
+                    statusUploadArea.classList.add('loaded');
+
+                    // Re-process the retained report so status flows through every view.
+                    if (lastReportCsv) {
+                        processCSV(lastReportCsv);
+                        const matched = countMatchedFaculty();
+                        showStatusMessage(
+                            `Status applied to ${lastReportName}: `
+                            + `<strong>${matched.matched.toLocaleString()} of ${matched.total.toLocaleString()}</strong> `
+                            + `faculty matched (${matched.pct}%), `
+                            + `${matched.unknown.toLocaleString()} unknown.`
+                            + (matched.unknown > 0
+                                ? ' Unmatched faculty are usually staff who left after this roster was pulled -'
+                                  + ' upload the roster for this term if the unknown count looks high.'
+                                : ''),
+                            false);
+                    } else {
+                        showStatusMessage(
+                            `Status list loaded (${result.map.size.toLocaleString()} faculty). `
+                            + 'Now upload the progress report CSV.', false);
+                    }
+                } catch (error) {
+                    showStatusMessage('Could not read the status list: ' + error.message, true);
+                }
+            };
+            reader.onerror = () => showStatusMessage('Error reading the status list file.', true);
+            reader.readAsText(file);
+        }
+
+        // Match rate of the loaded roster against the processed report.
+        function countMatchedFaculty() {
+            if (!processedData) return { matched: 0, total: 0, unknown: 0, pct: '0.0' };
+            let matched = 0, unknown = 0;
+            processedData.facultyMap.forEach(faculty => {
+                if (faculty.status === STATUS_UNKNOWN) unknown++; else matched++;
+            });
+            const total = matched + unknown;
+            return {
+                matched, total, unknown,
+                pct: total > 0 ? ((matched / total) * 100).toFixed(1) : '0.0'
+            };
+        }
+
         function handleFile(file) {
             if (!file.name.endsWith('.csv')) {
                 showError('Please upload a CSV file');
@@ -1027,6 +1288,8 @@
                 setTimeout(() => {
                     try {
                         const csvData = e.target.result;
+                        lastReportCsv = csvData;
+                        lastReportName = file.name;
                         processCSV(csvData);
                         showSuccess(`Successfully processed ${file.name}`);
                         tabsContainer.style.display = 'block';
@@ -1228,6 +1491,7 @@
                 const courseName = row['Course Name'];
                 const responded = row['Responded'] === 'Yes';
                 const respondedOn = responded ? parseExportDate(row['Responded Date']) : null;
+                const facultyStatus = lookupFacultyStatus(facultyId);
                 const campaignStart = parseExportDate(row['Campaign Creation Date']);
 
                 // v3.3: exactly one real department per row. FYS is tracked in
@@ -1253,6 +1517,7 @@
                     sectionName: row['Section Name'] || '',
                     department: department,
                     isFYS: isFYS,
+                    facultyStatus: facultyStatus,
                     responded: responded,
                     respondedDate: row['Responded Date'] || '',
                     notifications: row['How Many Notifications Sent'] || '',
@@ -1269,6 +1534,7 @@
                         reportsSent: 0,
                         reportsCompleted: 0,
                         courses: new Set(),
+                        status: facultyStatus,
                         firstResponseKey: '',
                         firstResponseText: '',
                         firstResponseUtc: null,
@@ -1296,6 +1562,7 @@
                             name: facultyName,
                             email: facultyEmail,
                             department: department,
+                            status: facultyStatus,
                             reportsSent: 0,
                             reportsCompleted: 0,
                             firstResponseKey: '',
@@ -1354,6 +1621,21 @@
                 if (faculty.reportsCompleted > 0) totalFacultyCompleted++;
             });
 
+            // v3.7: roll faculty up by employment status. Faculty are counted once
+            // each here (not per department), so these totals reconcile against the
+            // institution-wide figures rather than the department table.
+            const statusStats = new Map();
+            STATUS_ORDER.forEach(st => statusStats.set(st, {
+                faculty: new Set(), participated: new Set(), reportsSent: 0, reportsCompleted: 0
+            }));
+            facultyMap.forEach((faculty, id) => {
+                const bucket = statusStats.get(faculty.status) || statusStats.get(STATUS_UNKNOWN);
+                bucket.faculty.add(id);
+                if (faculty.reportsCompleted > 0) bucket.participated.add(id);
+                bucket.reportsSent += faculty.reportsSent;
+                bucket.reportsCompleted += faculty.reportsCompleted;
+            });
+
             // Most frequent campaign name drives the auto-filled Semester/Session.
             let topCampaign = '';
             let topCampaignCount = -1;
@@ -1372,6 +1654,8 @@
                 totalFaculty: facultyMap.size,
                 totalFacultyCompleted: totalFacultyCompleted,
                 exportRows: exportRows,
+                statusStats: statusStats,
+                statusListLoaded: facultyStatusMap.size > 0,
                 campaignName: topCampaign,
                 campaignCount: campaignNames.size,
                 semester: derived.semester,
@@ -1499,6 +1783,60 @@
                     </tbody>
                 </table>
             `;
+
+            // v3.7: Faculty Status summary. Shown only when a status list is loaded,
+            // since without one every row would read Unknown and tell you nothing.
+            if (processedData.statusListLoaded) {
+                const match = countMatchedFaculty();
+                let statusRows = '';
+                STATUS_ORDER.forEach(st => {
+                    const bucket = processedData.statusStats.get(st);
+                    if (!bucket || bucket.faculty.size === 0) return;
+                    const n = bucket.faculty.size;
+                    const part = bucket.participated.size;
+                    const partRate = ((part / n) * 100).toFixed(1);
+                    const compRate = bucket.reportsSent > 0
+                        ? ((bucket.reportsCompleted / bucket.reportsSent) * 100).toFixed(1)
+                        : '0.0';
+                    statusRows += `
+                        <tr>
+                            <td><span class="status-badge ${statusClass(st)}">${st}</span></td>
+                            <td>${n.toLocaleString()}</td>
+                            <td>${part.toLocaleString()}</td>
+                            <td><span class="percentage ${partRate >= 70 ? 'high' : partRate >= 40 ? 'medium' : 'low'}">${partRate}%</span></td>
+                            <td>${bucket.reportsSent.toLocaleString()}</td>
+                            <td>${bucket.reportsCompleted.toLocaleString()}</td>
+                            <td><span class="percentage ${compRate >= 70 ? 'high' : compRate >= 40 ? 'medium' : 'low'}">${compRate}%</span></td>
+                        </tr>
+                    `;
+                });
+
+                html += `
+                    <div class="status-summary">
+                        <h3>Faculty Status</h3>
+                        <div class="status-note">
+                            From <strong>${statusListName}</strong> &mdash;
+                            ${match.matched.toLocaleString()} of ${match.total.toLocaleString()} faculty matched
+                            (${match.pct}%). Each faculty member is counted once, so these rows total to the
+                            institution figures above rather than to the department table.
+                        </div>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Status</th>
+                                    <th>Faculty Sent Reports</th>
+                                    <th>Faculty Participated</th>
+                                    <th>Participation Rate</th>
+                                    <th>Reports Sent</th>
+                                    <th>Reports Completed</th>
+                                    <th>Completion Rate</th>
+                                </tr>
+                            </thead>
+                            <tbody>${statusRows}</tbody>
+                        </table>
+                    </div>
+                `;
+            }
 
             // First Year Seminar view. FYS is not a department as of v3.3, so it
             // gets its own summary; these reports are also included in the home
@@ -1667,6 +2005,7 @@
                                 <thead>
                                     <tr>
                                         <th class="sortable" data-column="name">Faculty Name</th>
+                                        <th class="sortable" data-column="status">Status</th>
                                         <th class="sortable" data-column="sent">Reports Sent</th>
                                         <th class="sortable" data-column="completed">Reports Completed</th>
                                         <th class="sortable" data-column="percentage">Reports Completed %</th>
@@ -1702,8 +2041,10 @@
                             data-sent="${faculty.reportsSent}" 
                             data-completed="${faculty.reportsCompleted}" 
                             data-percentage="${percentage}"
+                            data-status="${faculty.status || STATUS_UNKNOWN}"
                             data-any="${participated}">
                             <td>${faculty.name}</td>
+                            <td><span class="status-badge ${statusClass(faculty.status || STATUS_UNKNOWN)}">${faculty.status || STATUS_UNKNOWN}</span></td>
                             <td>${faculty.reportsSent}</td>
                             <td>${faculty.reportsCompleted}</td>
                             <td><span class="percentage ${percentageClass}">${percentage}%</span></td>
@@ -2066,7 +2407,8 @@
                 'Faculty Reports Sent Overall', 'Faculty Reports Completed Overall', 'Faculty Participated Overall',
                 'Campaign Start Date', 'Days Since Campaign Start',
                 'Faculty First Response Date', 'Faculty First Response Date in Dept',
-                'Faculty First Response Date in FYS', 'Faculty Days to First Response'
+                'Faculty First Response Date in FYS', 'Faculty Days to First Response',
+                'Faculty Status'
             ];
 
             const lines = [headers.join(',')];
@@ -2117,7 +2459,8 @@
                     overall ? (overall.firstResponseText || '') : '',
                     deptStat ? (deptStat.firstResponseText || '') : '',
                     fysStat ? (fysStat.firstResponseText || '') : '',
-                    overall ? daysBetween(overall.campaignStartUtc, overall.firstResponseUtc) : ''
+                    overall ? daysBetween(overall.campaignStartUtc, overall.firstResponseUtc) : '',
+                    row.facultyStatus
                 ].map(csvCell).join(','));
             });
 
@@ -2270,6 +2613,7 @@
                 
                 const rowData = {
                     name: faculty.name,
+                    status: faculty.status || STATUS_UNKNOWN,
                     reportsSent: faculty.reportsSent.toString(),
                     reportsCompleted: faculty.reportsCompleted.toString(),
                     percentage: `${percentage}%`,
@@ -2292,6 +2636,7 @@
             sortedFaculty.forEach(faculty => {
                 tableData.push([
                     faculty.name,
+                    faculty.status,
                     faculty.reportsSent,
                     faculty.reportsCompleted,
                     faculty.percentage,
@@ -2303,7 +2648,7 @@
             yPos += 15;
             doc.autoTable({
                 startY: yPos,
-                head: [['Faculty Name', 'Reports Sent', 'Reports Completed', 'Reports Completed %', 'Participated?']],
+                head: [['Faculty Name', 'Status', 'Reports Sent', 'Reports Completed', 'Reports Completed %', 'Participated?']],
                 body: tableData,
                 theme: 'striped',
                 headStyles: { 
@@ -2316,15 +2661,17 @@
                     fontSize: 9
                 },
                 columnStyles: {
-                    0: { cellWidth: 60 },
-                    1: { cellWidth: 30, halign: 'center' },
-                    2: { cellWidth: 35, halign: 'center' },
+                    0: { cellWidth: 50 },
+                    1: { cellWidth: 24, halign: 'center' },
+                    2: { cellWidth: 26, halign: 'center' },
                     3: { cellWidth: 30, halign: 'center' },
-                    4: { cellWidth: 30, halign: 'center' }
+                    4: { cellWidth: 28, halign: 'center' },
+                    5: { cellWidth: 26, halign: 'center' }
                 },
                 didDrawCell: function(data) {
-                    // Color code the Participated column (column index 4)
-                    if (data.column.index === 4 && data.section === 'body') {
+                    // v3.7: Participated? moved from column 4 to column 5 when the
+                    // Status column was inserted.
+                    if (data.column.index === 5 && data.section === 'body') {
                         const text = data.cell.text[0];
                         if (text === 'Yes') {
                             doc.setTextColor(34, 139, 34); // Green color
@@ -2615,13 +2962,14 @@
             }
 
             // Build CSV content
-            let csv = 'Faculty Name,Email,Department,Reports Sent\n';
+            let csv = 'Faculty Name,Email,Status,Department,Reports Sent\n';
             nonRespondents.forEach(faculty => {
                 // Escape fields that might contain commas
                 const name = `"${faculty.name.replace(/"/g, '""')}"`;
                 const email = `"${(faculty.email || '').replace(/"/g, '""')}"`;
+                const status = `"${(faculty.status || STATUS_UNKNOWN).replace(/"/g, '""')}"`;
                 const dept = `"${faculty.department.replace(/"/g, '""')}"`;
-                csv += `${name},${email},${dept},${faculty.reportsSent}\n`;
+                csv += `${name},${email},${status},${dept},${faculty.reportsSent}\n`;
             });
 
             // If returnContent is true, return CSV string for zipping
